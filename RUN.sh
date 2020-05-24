@@ -250,39 +250,8 @@ for FILE in $INPUTFILES; do
         else
             echo "No input for MaxEntScan"
         fi
-        #run genesplicer
-        if [ -s temp/"$fileID"gsInput.FASTA ] ; then
-            echo "Running GeneSplicer..."
-            bin/linux/genesplicerAdapted temp/"$fileID"gsInput.FASTA human > temp/"$fileID"gsScores.txt
-        else
-            echo "No input for GeneSplicer"
-        fi
-        #run branchpointer SNPs
-        if [ "$USEBP" = "TRUE" -a "$USEBPINDELS" = "FALSE" ]; then
-            echo "Running Branchpointer..."
-            Rscript --slave --vanilla bin/bpProcessing.R "$fileID" $(pwd) "$ANNOTATION" "$GENOMEBUILD" &> output/"$fileID"bpLog.txt
-            #awk -v OFS=\\t '{print $2, $3, $4, $8, $9, $15, $16, $21, $22, $23, $24}' output/bpOutputSNPs.txt > output/bpSNPsSummarised.txt
-        fi
-        #run branchpointer indels
-        if [ "$USEBPINDELS" = "TRUE" ] ; then
-            echo "Running Branchpointer..."
-            while read -r na chr start strand ref alt; do
-                refLength=${#ref}
-                altLength=${#ref}
-                end=$((refLength+start))
-                if [ $altLength -gt 1 ] || [ $refLength -gt 1 ]; then
-                    echo -e ".\t$chr\t$start\t$end\t$strand\t$ref\t$alt" >> temp/"$fileID"bpInputIndels.txt
-                fi
-            done < temp/"$fileID"bpInput.txt
-            Rscript --slave --vanilla bin/bpProcessingINDELS.R "$fileID" $(pwd) "$ANNOTATION" "$GENOMEBUILD" &> output/"$fileID"bpIndelLog.txt
-            #awk -v OFS=\\t '{print $2, $3, $4, $8, $9, $16, $17, $23, $24, $25, $26}' output/"$fileID"bpOutputIndels.txt > output/bpIndelsSummarised.txt
-            #awk -v OFS=\\t '{print $2, $3, $4, $8, $9, $15, $16, $22, $23, $24, $25}' output/"$fileID"bpOutputSNPs.txt" > output/bpSNPsSummarised.txt
-        fi
         #merge scores into one line
         scoresToMerge=""
-        if [ -s temp/"$fileID"gsScores.txt ] ; then
-            scoresToMerge="temp/"$fileID"gsScores.txt"
-        fi
         if [ -s temp/"$fileID"mesDonorScores.txt ] ; then
             scoresToMerge="$scoresToMerge temp/"$fileID"mesDonorScores.txt"
         fi
@@ -310,6 +279,7 @@ for FILE in $INPUTFILES; do
             echo "Processing scores..."
             cat $(echo "$scoresToMerge") data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt sources/terminatingMergeLine.txt | sort -k1,1 -V -k 2,2n -k 3 -k 4 -s | tee mergeInput.txt | java -cp bin mergeOutput "$fileID" inputAdd="$inputChrRemove" inputRemove="$inputChrAdd" "$strand" >> mergeOut.txt
         fi
+	rm temp/"$fileID"mes*
     done
     #sort predictions
     echo "sorting predictions..."
@@ -329,7 +299,83 @@ for FILE in $INPUTFILES; do
     cat output/"$fileID"_out.txt | cut --complement -f11-19 > output/"$fileID"_out.txt_temp
     rm output/"$fileID"_out.txt
 
-    echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tdonGainP\taccGainP\tdonLossP\taccLossP\tdistDon5\'\tdistDon3\'\tdistAcc5\'\tdistAcc3\'\tdon1PosRef\tdon1PosAlt\tdon2PosRef\tdon2PosAlt\tacc1PosRef\tacc1PosAlt\tacc2PosRef\tacc2PosAlt" > output/"$fileID"_out.txt
-    grep -v "^#" output/"$fileID"_out.txt_temp >> output/"$fileID"_out.txt
-    rm output/"$fileID"_unsortedBothStrands.txt
+    #echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tdonGainP\taccGainP\tdonLossP\taccLossP\tdistDon5\'\tdistDon3\'\tdistAcc5\'\tdistAcc3\'\tdon1PosRef\tdon1PosAlt\tdon2PosRef\tdon2PosAlt\tacc1PosRef\tacc1PosAlt\tacc2PosRef\tacc2PosAlt" > output/"$fileID"_out.txt
+    grep -v "^#" output/"$fileID"_out.txt_temp | awk -v OFS="\\t" '{print $1, $2, $3, $4, $5, $6, $7, $11, $12, $13, $14}' >> output/"$fileID"_out.txt
+    rm output/"$fileID"_unsortedBothStrands.txt output/*ssGain* output/*withinSS*
+    #merge predictions from both strands
+    while read -r chr start end ref alt gene within donGain accGain donLoss accLoss ; do
+	#if not first line
+        if [ "$prevLine" != "" ]; then
+            newDonGain=$(echo "$donGain")
+            newAccGain=$(echo "$accGain")
+            prevStart=$(echo "$prevLine" | awk '{print $2}')
+	    duplicate="false"
+	    #check for duplicate
+            if [ "$prevStart" == "$start" ]; then
+            	prevRef=$(echo "$prevLine" | awk '{print $4}')
+                if [ "$prevRef" == "$ref" ]; then
+            	    prevAlt=$(echo "$prevLine" | awk '{print $5}')
+                    if [ "$prevAlt" == "$alt" ]; then
+		        duplicate="true"
+		    fi
+		fi
+	    fi
+	    #if duplicate line
+	    if [ "$duplicate" == "true" ]; then
+                #overlapping, so find highest scores
+                prevGene=$(echo "$prevLine" | awk '{print $6}')
+		allGenes=$(echo "$prevGene,$gene")
+                #donGain
+                oldDonGain=$(echo "$prevLine" | awk '{print $8}')
+		if [ 1 -eq "$(echo "${donGain} < ${oldDonGain}" | bc)" ]; then
+                    newDonGain=$(echo "$oldDonGain")
+		fi
+                #accGain
+                oldAccGain=$(echo "$prevLine" | awk '{print $9}')
+		if [ 1 -eq "$(echo "${accGain} < ${oldAccGain}" | bc)" ]; then
+                    newAccGain=$(echo "$oldAccGain")
+		fi
+		#withinSS
+                oldWithin=$(echo "$prevLine" | awk '{print $7}')
+		newWithin=$(echo "$oldWithin,$within")
+		newDonLoss=$(echo "$donLoss")
+		newAccLoss=$(echo "$accLoss")
+                oldDonLoss=$(echo "$prevLine" | awk '{print $10}')
+                oldAccLoss=$(echo "$prevLine" | awk '{print $11}')
+		#donLoss
+		if [ "$oldDonLoss" != "." ]; then
+		    if [ "$newDonLoss" != "." ]; then
+		        #scores for both strands so need to compare
+			if [ 1 -eq "$(echo "${donLoss} < ${oldDonLoss}" | bc)" ]; then
+			    newDonLoss=$(echo "$oldDonLoss")
+			fi
+		    else
+			newDonLoss=$(echo "$oldDonLoss")
+		    fi
+		fi
+		#accLoss
+		if [ "$oldAccLoss" != "." ]; then
+		    if [ "$newAccLoss" != "." ]; then
+		        #scores for both strands so need to compare
+			if [ 1 -eq "$(echo "${accLoss} < ${oldAccLoss}" | bc)" ]; then
+			    newAccLoss=$(echo "$oldAccLoss")
+			fi
+		    else
+			newAccLoss=$(echo "$oldAccLoss")
+		    fi
+		fi
+		#set updated values
+	    	prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$allGenes\t$newWithin\t$newDonGain\t$newAccGain\t$newDonLoss\t$newAccLoss")
+	    #not duplicate
+	    else
+    		echo -e "$prevLine" >> output/"$fileID"_out.txt_merged
+	    	prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$gene\t$within\t$donGain\t$accGain\t$donLoss\t$accLoss")
+	    fi
+	#first line only
+	else
+	    rm "$file"_fixed
+	    prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$gene\t$within\t$donGain\t$accGain\t$donLoss\t$accLoss")
+        fi
+    done < output/"$fileID"_out.txt
+    echo -e "$prevLine" >> output/"$fileID"_out.txt_merged
 done

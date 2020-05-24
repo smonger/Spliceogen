@@ -115,6 +115,11 @@
 	                    out[24]= Integer.toString(phase[1]);
 	                    out[25]= Integer.toString(phase[2]);
 	                    out[26]= Integer.toString(phase[3]);
+			    //phase adjust
+			    double donPhase = donPhase(phase[2],phase[3]);
+			    double accPhase = accPhase(phase[0],phase[1]);
+			    out[19]= Double.toString(Double.parseDouble(out[19]) * donPhase);
+			    out[20]= Double.toString(Double.parseDouble(out[20]) * accPhase);
                         //temporarily include don/acc score position in output
                         //don
                         for (int i=14; i<18; i++) {
@@ -727,4 +732,49 @@
         	return scores;
         }
 
+	public static double donPhase(int distAcc5, int distAcc3) {
+	    double val = 1;
+	    if (distAcc3<80) {
+		//trough
+		val = 0.04;
+	    } else if (distAcc5 < 200 ) {
+		//peak
+		int[] bins = {20,40,60,80,100,120,140,160,180,200};
+		double[] vals = {0.18,0.39,0.47,0.98,1,0.75,0.62,0.58,0.63,0.34};
+		for (int i=0; i< bins.length; i++) {
+		    if (distAcc5 < (double)bins[i]) {
+		        val = vals[i];
+		    }
+		}
+	    } else {
+		//baseline
+	    	val = 0.14;
+	    }
+	    return val;
 	}
+
+	public static double accPhase(int distDon5, int distDon3) {
+	    double val = 1;
+	    if (distDon5<60) {
+		//trough
+		val = 0.02;
+	    } else if (distDon3 < 260 ) {
+		//peak
+		int[] bins = {20,40,60,80,100,120,140,160,180,200,220,240,260};
+		double[] vals = {0.06,0.27,0.26,0.51,0.76,0.91,1,0.8,0.62,0.43,0.45,0.22,0.24};
+		for (int i=0; i< bins.length; i++) {
+		    if (distDon3 < (double)bins[i]) {
+		        val = vals[i];
+		    }
+		}
+	    } else {
+		//baseline
+		if (distDon3 < distDon5) {
+	    	    val = 0.05;
+		} else {
+	    	    val = 0.12;
+		}
+	    }
+	    return val;
+	}
+}
