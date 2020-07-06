@@ -187,6 +187,7 @@ for FILE in $INPUTFILES; do
     fi
     #bedtools intersect to exclude intergenic variants
     strands="pos neg"
+    strands="neg"
     for strand in $strands; do
         strandSym="+"
         if [ "$strand" == "neg" ]; then
@@ -277,9 +278,10 @@ for FILE in $INPUTFILES; do
             echo "No MaxEntScan/GeneSplicer/ESRseq scores to process"
         else
             echo "Processing scores..."
-            cat $(echo "$scoresToMerge") data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt sources/terminatingMergeLine.txt | sort -k1,1 -V -k 2,2n -k 3 -k 4 -s | tee mergeInput.txt | java -cp bin mergeOutput "$fileID" inputAdd="$inputChrRemove" inputRemove="$inputChrAdd" "$strand" >> mergeOut.txt
+            cat $(echo "$scoresToMerge") data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt sources/terminatingMergeLine.txt | sort -k1,1 -V -k 2,2n -k 3 -k 4 -s | tee mergeInput_"$strand".txt | java -cp bin mergeOutput "$fileID" inputAdd="$inputChrRemove" inputRemove="$inputChrAdd" "$strand" >> mergeOut.txt
+
         fi
-	rm temp/"$fileID"mes*
+	#rm temp/"$fileID"mes*
     done
     #sort predictions
     echo "sorting predictions..."
@@ -293,7 +295,7 @@ for FILE in $INPUTFILES; do
         sort -gr -k9,9 temp/"$fileID"_loss_unsorted.txt | cut -f1-8 >> output/"$fileID"_withinSS.txt
     fi 
     #clean up temp files
-    rm temp/"$fileID"* 2> /dev/null
+    #rm temp/"$fileID"* 2> /dev/null
     #sort -k1,1 -V -k 2,2n -k 3 -k 4 -s > output/"$fileID"_out_sorted.txt
     sort -k1,1 -V -k 2,2n -k 3 -k 4 -s output/"$fileID"_unsortedBothStrands.txt >> output/"$fileID"_out.txt
     cat output/"$fileID"_out.txt | cut --complement -f11-19 > output/"$fileID"_out.txt_temp
