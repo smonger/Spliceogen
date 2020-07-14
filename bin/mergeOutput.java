@@ -2,7 +2,7 @@
  * Author: Steve Monger 2020
  * 
  * Description: Merges all variant and annotation information to determine motif changes and exon-intron phase.
- * These scores are integrated to determine logistic regression probabilities.
+ * These are integrated to determine logistic regression probabilities.
  * 
  * Input: Stream of gene annotation info, splice site locations, MaxEntScan scores, ESRseq scores, sorted by chr and start position
  * Output: One line per variant with final prediction scores and variant annotation info
@@ -13,7 +13,8 @@ import java.util.Arrays;
 import java.util.jar.Attributes.Name;
 import java.lang.*;
 import java.text.DecimalFormat;
-public class mergeOutput {
+public class mergeOutput
+{
 
     //store output lines in buffers to minimise I/O
     public static String[] avBuffer = new String[30000];
@@ -23,12 +24,16 @@ public class mergeOutput {
     public static int avBufferIndex = 0;
     public static int ssBufferIndex = 0;
 
+    // positional distribution scores
+    public static double[] donPosBias = new double[550];
+    public static double[] accPosBias = new double[550];
+
     public static void main (String[] args)
     {
-        	        String fileName=args[0];
-        	        String chrAdd=args[1];
-        	        String chrRemove=args[2];
-        	        String strand=args[3];
+        String fileName=args[0];
+        String chrAdd=args[1];
+        String chrRemove=args[2];
+        String strand=args[3];
 
         //String chrAdd="";
         //String chrRemove="";
@@ -56,16 +61,41 @@ public class mergeOutput {
         //geneID[]...chr(0), name(1), end(2)
         //prevID[]...chr(0), start(1), ref(2), alt(3), type(4)
 
-        //process lines
-        try {
+        //read in positional bias scores
+        try
+        {
+            File file = new File("data/donDist.txt");         
+            BufferedReader br = new BufferedReader(new FileReader(file));
+            String[] split = new String[2];
+            int i=0;
+            while ((s = br.readLine()) != null)
+            {
+                split = s.split("\\s+");
+                donPosBias[i] = Double.parseDouble(split[1]);
+                i++;
+            }	            
+
+            file = new File("data/accDist.txt");         
+            br = new BufferedReader(new FileReader(file));
+            i=0;
+            while ((s = br.readLine()) != null)
+            {
+                split = s.split("\\s+");
+                accPosBias[i] = Double.parseDouble(split[1]);
+                i++;
+            }
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }	            
+
+        //process input lines
+        try
+        {
             BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
             while ((s = in.readLine()) != null && s.length() != 0)
             {
-            //File file = new File("/home/steven/Documents/Work/splicePerf/train/tcga/Spliceogen/mergeInput_pos.txt");         
-            //BufferedReader br = new BufferedReader(new FileReader(file));
-
-            //while ((s = br.readLine()) != null)
-            //{	            
                 String[] split = s.split("\\s+");
                 String chr = split[0];
                 int start = Integer.parseInt(split[1]);
@@ -147,6 +177,9 @@ public class mergeOutput {
                     out[24]= Integer.toString(phase[1]);
                     out[25]= Integer.toString(phase[2]);
                     out[26]= Integer.toString(phase[3]);
+
+                    out[7] = Double.toString(donPhaseScore(phase));
+                    out[8] = Double.toString(accPhaseScore(phase));
                     /*
                     //temporarily include don/acc score position in output
                     //don
@@ -176,13 +209,13 @@ public class mergeOutput {
                         out[0]=out[0].substring(3);
                     }
 
-                    //add line to output buffers
+                    //add line to output buffers and reset scores
                     outputVariantToBuffers(out);
-                    //reset scores
                     Arrays.fill(scores, -99.0);
+
                     //append to file and empty buffers every ~25000 lines
                     if (avBufferIndex > 25000) {
-                        //	                        appendToFiles(fileName);
+                        appendToFiles(fileName);
                         resetOutputArrays();
                     }                
                 }
@@ -248,6 +281,7 @@ public class mergeOutput {
 
                     if (split.length>11)
                     {
+
                         //update splice site pos/name arrays with info from new overlapping gene
                         while (donStart[donIndex]>0)
                         {
@@ -257,13 +291,19 @@ public class mergeOutput {
                         {
                             accIndex++;
                         }
-                        for (int k = 0; k < donStartStr.length; k++)
+
+                        int donMinIndex = Math.min(donStartStr.length, donEndStr.length);
+                        int accMinIndex = Math.min(accStartStr.length, accEndStr.length);
+                        donMinIndex = Math.min(donMinIndex, donNamesStr.length);
+                        accMinIndex = Math.min(accMinIndex, accNamesStr.length);
+
+                        for (int k = 0; k < donMinIndex; k++)
                         {
                             donStart[donIndex+k] = Integer.parseInt(donStartStr[k]);
                             donEnd[donIndex+k] = Integer.parseInt(donEndStr[k]);
                             donNames[donIndex+k] = donNamesStr[k];
                         }
-                        for (int k = 0; k < accStartStr.length; k++)
+                        for (int k = 0; k < accMinIndex; k++)
                         {
                             accStart[accIndex+k] = Integer.parseInt(accStartStr[k]);
                             accEnd[accIndex+k] = Integer.parseInt(accEndStr[k]);
@@ -283,13 +323,13 @@ public class mergeOutput {
             //final append to file
             if (avBufferIndex > 0)
             {
-                //	                appendToFiles(fileName);
+                appendToFiles(fileName);
             }
-        }
-        catch (Exception e)
-        {
-            e.printStackTrace();
-        }
+            }
+            catch (Exception e)
+            {
+                e.printStackTrace();
+            }
         }
 
         //scans previously overlapping genes, returns updated geneID
@@ -298,7 +338,7 @@ public class mergeOutput {
             String[] updatedGeneID = new String[4];
 
             //first line of input and chromosome changes
-            if (prevGeneID[1] == "." || !(prevGeneID[0].equals(chr)))
+            if (prevGeneID[1].isEmpty() || !(prevGeneID[0].equals(chr)))
             {
                 updatedGeneID[0] = chr;
                 updatedGeneID[1] = currentGeneName;
@@ -323,18 +363,12 @@ public class mergeOutput {
                     updatedGeneID[3] = updatedGeneID[3].concat(geneEndSplit[i]).concat(";");
                 }
             }
-            //}
-            //else if ()
-            //{
-
-            //}
 
             //append current gene info
             updatedGeneID[0] = chr;
             updatedGeneID[1] = updatedGeneID[1].concat(currentGeneName);
             updatedGeneID[2] = updatedGeneID[2].concat(currentGeneStart);
             updatedGeneID[3] = updatedGeneID[3].concat(currentGeneEnd);
-            //}
 
             return updatedGeneID;
 }
@@ -488,6 +522,7 @@ public static String[] updateOverlappingGenes(String[] geneID, String[] prevID)
 {
     if (geneID[1].contains(";"))
     {
+        String[] geneID_original = geneID;
         String[] geneNameSplit = geneID[1].split(";");
         String[] geneStartSplit = geneID[2].split(";");
         String[] geneEndSplit = geneID[3].split(";");
@@ -511,6 +546,10 @@ public static String[] updateOverlappingGenes(String[] geneID, String[] prevID)
                 geneID[2] = geneID[2].concat(geneStartSplit[i]);
                 geneID[3] = geneID[3].concat(geneEndSplit[i]);
             }
+        }
+        if (geneID[1].equals(""))
+        {
+            return geneID_original;
         }
     }
     return geneID;
@@ -618,11 +657,13 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
     int startPos = Integer.parseInt(prevID[1]);
     int[] phase = new int[4];
     int i = 0;
+    int geneStart = getMinGeneStart(geneID);
+    int geneEnd = getMaxGeneEnd(geneID);
 
     //positive strand
     if (strand.equals("pos"))
     {
-        phase[0] = -99999; phase[2] = -99999;
+        phase[0] = -9999999; phase[2] = -9999999;
         phase[1] = Integer.MAX_VALUE; phase[3] = Integer.MAX_VALUE;
 
         //loop over donor sites
@@ -659,43 +700,56 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
             i++;
         }
 
-        phase[0] = startPos - phase[0]; phase[1] = phase[1] - startPos; phase[2] = startPos - phase[2]; phase[3] = phase[3] - startPos;
-
         //if within first exon/intron (no 5' acceptor)
-        if (phase[2] < -99999)
+        if (phase[2] == -9999999)
         {
             //check for conflicting overlapping gene end positions
-            int geneStart = getMinGeneStart(geneID);
-
             phase[2] = geneStart - startPos;
 
             //if within first exon (no 5' donor)
-            if (phase[0] < -99999)
+            if (phase[0] == -9999999)
             {
                 phase[0] = geneStart - startPos;
             }
+			else
+			{
+				phase[0] = startPos - phase[0];
+			}
         }
+		else
+		{
+            phase[0] = startPos - phase[0];
+			phase[2] = startPos - phase[2];
+		}
 
         //if within last exon/intron (no 3' donor)
-        else if (phase[1] > 9999999)
+        if (phase[1] == Integer.MAX_VALUE)
         {
             //check for conflicting overlapping gene end positions
-            int geneEnd = getMaxGeneEnd(geneID);
-
             phase[1] = startPos - geneEnd;
 
             //if within last exon (no 3' acceptor)
-            if (phase[3] > 9999999)
+            if (phase[3] == Integer.MAX_VALUE)
             {
                 phase[3] = startPos - geneEnd;
             }
+			else
+			{
+				phase[3] = phase[3] - startPos;
+			}
         }
+		else
+		{
+			phase[1] = phase[1] - startPos;
+            phase[3] = startPos - geneEnd;
+		}
     }
+
     //negative strand
     else if (strand.equals("neg"))
     {
         phase[0] = Integer.MAX_VALUE; phase[2] = Integer.MAX_VALUE;
-        phase[1] = -99999; phase[3] = -99999;
+        phase[1] = -9999999; phase[3] = -9999999;
 
         //loop over donor sites
         while (donStart[i] > 0)
@@ -713,8 +767,8 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
             i++;
         }
 
-        i = 0;
         //loop over acceptor sites
+        i = 0;
         while (accStart[i] > 0)
         {
             //closest upstream acceptor
@@ -730,34 +784,48 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
             }
             i++;
         }
-        phase[0] = phase[0] - startPos ; phase[1] = startPos - phase[1]; phase[2] = phase[2] - startPos; phase[3] = startPos - phase[3];   
 
         //if within first exon/intron (no 5' acceptor) 
-        if (phase[2] > 9999999)
+        if (phase[2] == Integer.MAX_VALUE)
         {		        	
-            //check for conflicting overlapping gene end positions
-            int geneEnd = getMaxGeneEnd(geneID);
-
             phase[2] = startPos - geneEnd;
+
             //if within first exon (no 5' donor)
-            if (phase[0] > 9999999) {
+            if (phase[0] == Integer.MAX_VALUE)
+			{
                 phase[0] = startPos - geneEnd;
             }
+			else
+			{
+				phase[0] = phase[0] - startPos ;
+			}
         }
+		else
+		{
+			phase[0] = phase[0] - startPos ;
+			phase[2] = phase[2] - startPos;
+		}
 
         //if within last exon/intron (no 3' donor) 
-        if (phase[1] > 9999999)
+        if (phase[1] == -9999999)
         {
-            //check for conflicting overlapping gene start positions
-            int geneStart = getMinGeneStart(geneID);
-
             phase[1] = geneStart - startPos;
+
             //if within last exon (no 3' acceptor)
-            if (phase[3] > 9999999)
+            if (phase[3] == -9999999)
             {
                 phase[3] = geneStart - startPos;
             }
+			else
+			{
+				phase[3] = startPos - phase[3];
+			}
         }      
+		else
+		{
+			phase[1] = startPos - phase[1];
+			phase[3] = startPos - phase[3];
+		}
     }   
     return phase;
 }	    
@@ -772,11 +840,6 @@ public static void outputVariantToBuffers(String[] out) {
     avLine = avLine+out[26];
     avBuffer[avBufferIndex] = avLine;
     avBufferIndex++;
-
-
-
-    System.out.println(avBuffer[avBufferIndex-1]);
-
     /*	        //write withinSS
                 if (out[6].contains("ENSE")) {
                 String ssLine = out[0]+"\t"+out[1]+"\t"+out[3]+"\t"+out[4]+"\t"+out[5]+"\t"+out[6]+"\t"+out[21]+"\t"+out[22];
@@ -821,7 +884,7 @@ public static void outputVariantToBuffers(String[] out) {
     // 
 public static int getMaxGeneEnd(String[] geneID)
 {	    	
-    int pos;
+    int pos = 0;
     if (geneID[3].contains(";"))
     {
         String[] split = geneID[3].split(";");
@@ -834,7 +897,7 @@ public static int getMaxGeneEnd(String[] geneID)
             }
         }
     }
-    else
+    else if (!geneID[3].equals(""))
     {
         pos = Integer.parseInt(geneID[3]);
     }	    	
@@ -845,7 +908,7 @@ public static int getMaxGeneEnd(String[] geneID)
 // 	    
 public static int getMinGeneStart(String[] geneID)
 {	    	
-    int pos;
+    int pos = 0;
     if (geneID[2].contains(";"))
     {
         String[] split = geneID[2].split(";");
@@ -858,7 +921,7 @@ public static int getMinGeneStart(String[] geneID)
             }
         }
     }
-    else
+    else if (!geneID[3].equals(""))
     {
         pos = Integer.parseInt(geneID[2]);
     }	    	
@@ -938,50 +1001,90 @@ public static double[] updateWithinSSmotifPostions( String withinSS, double[] sc
     return scores;
 }
 
-public static double donPhase(int distAcc5, int distAcc3)
+public static double donPhaseScore(int[] phase)
 {
-    double val = 1;
-    if (distAcc3<80) {
-        //trough
+    double val = 0;
+
+    //within final exon or final intron trough
+    if (phase[1] < 0 && phase[3] < 80)
+    {
         val = 0.04;
-    } else if (distAcc5 < 200 ) {
-        //peak
-        int[] bins = {20,40,60,80,100,120,140,160,180,200};
-        double[] vals = {0.18,0.39,0.47,0.98,1,0.75,0.62,0.58,0.63,0.34};
-        for (int i=0; i< bins.length; i++) {
-            if (distAcc5 < (double)bins[i]) {
-                val = vals[i];
-            }
-        }
-    } else {
-        //baseline
-        val = 0.14;
     }
+
+    //within any other trough
+    else if (phase[3] > 0 && phase[3] < 80)
+    {
+        val = donPosBias[200-phase[3]];
+    }
+
+    //within first exon/intron peak
+    else if (phase[2] < 0 && phase[2] > -350)
+    {
+        val = donPosBias[200-phase[2]];
+    }
+
+    //within internal peak
+    else if (phase[2] > 0 && phase[2] < 350)
+    {
+        val = donPosBias[200+phase[2]];
+    }
+
+    //within secondary peak
+    else if (phase[3] > 0 && phase[3] < 200)
+    {
+        val = donPosBias[200-phase[3]];
+    }
+
+    //intronic baseline
+    else
+    {
+        val = 0.13;
+    }
+
     return val;
 }
 
-public static double accPhase(int distDon5, int distDon3) {
-    double val = 1;
-    if (distDon5<60) {
-        //trough
+public static double accPhaseScore(int[] phase)
+{
+    double val = 0;
+
+    //within first exon or first intron trough
+    if (phase[2] < 0 && phase[0] < 60)
+    {
         val = 0.02;
-    } else if (distDon3 < 260 ) {
-        //peak
-        int[] bins = {20,40,60,80,100,120,140,160,180,200,220,240,260};
-        double[] vals = {0.06,0.27,0.26,0.51,0.76,0.91,1,0.8,0.62,0.43,0.45,0.22,0.24};
-        for (int i=0; i< bins.length; i++) {
-            if (distDon3 < (double)bins[i]) {
-                val = vals[i];
-            }
-        }
-    } else {
-        //baseline
-        if (distDon3 < distDon5) {
-            val = 0.05;
-        } else {
-            val = 0.12;
-        }
     }
+
+    //within any other trough
+    else if (phase[0] < 80)
+    {
+        val = accPosBias[350+phase[0]];
+    }
+
+    //within last exon/intron peak
+    else if (phase[1] < 0 && phase[1] > -350)
+    {
+        val = accPosBias[350+phase[1]];
+    }
+
+    //within internal peak
+    else if (phase[1] < 350 && phase[1] > 0)
+    {
+        val = accPosBias[350-phase[1]];
+    }
+
+    //within secondary peak
+    else if (phase[0] >= 80 && phase[0] < 200)
+    {
+        val = accPosBias[350+phase[0]];
+    }
+
+    //intronic baseline
+    else
+    {
+        val = 0.09;
+    }
+
     return val;
 }
+
 }
