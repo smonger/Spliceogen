@@ -234,7 +234,7 @@ class seqScan {
                             mesIndexDon++;
                             j++;
                         }
-                        while (j<ref.length()+correct2&& i >= j+3);
+                        while (j<ref.length()+correct2 && i >= j+3);
                     }
                     else if (alt.length()>1)
                     {
