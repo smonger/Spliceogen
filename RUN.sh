@@ -307,7 +307,7 @@ for FILE in $INPUTFILES; do
             sort -k1,1 -V -k 2,2n -k 3 -k 4 -s output/"$fileID"_unsortedBothStrands.txt >> output/"$fileID"_out.txt
         else
             echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tmesDonRef\tmesDonAlt\tmesAccRef\tmesAccAlt\tdistDon5'\tdistDon3'\tdistAcc5'\tdistAcc3'\tdESE\tdESS\tdonGainP\taccGainP\tdonLossP\taccLossP\tdonPhaseScore\taccPhaseScore" > output/"$fileID"_out.txt
-            sort -k1,1 -V -k 2,2n -k 3 -k 4 -s temp/"$fileID"_out_unsorted.txt | cut --complement -f18-19 >> output/"$fileID"_out.txt
+            sort -k1,1 -V -k 2,2n -k 3 -k 4 -s temp/"$fileID"_out_unsorted.txt | cut --complement -f3,8,9,10,11,18,19 >> output/"$fileID"_out.txt
         fi
     fi
     #clean up temp files
