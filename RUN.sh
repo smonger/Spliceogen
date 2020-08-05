@@ -30,6 +30,7 @@ USEBPINDELS=""
 ANNOTATION=""
 FASTAPATH=""
 GENOMEBUILD=""
+STRANDS="pos neg"
 #parse command line args
 while [[ $# -gt 0 ]]
 do
@@ -91,6 +92,10 @@ case $key in
     USEBPINDELS="TRUE"
     shift
     shift ;;
+    -strand)
+    STRANDS="$2"
+    shift
+    shift ;;
     *)
     POSITIONAL+=("$1")
     shift ;;
@@ -126,10 +131,8 @@ fastaChr=$(cat "$FASTAPATH" | head -1 | awk '{print $1}' | grep chr)
 gtfBasename=$(basename $ANNOTATION)
 if [ ! -f data/"$gtfBasename"_SpliceSiteIntervals_pos.txt ] || [[ "$ANNOTATION" -nt data/"$gtfBasename"_SpliceSiteIntervals_pos.txt ]] ; then
     echo "Preparing splice site annotation..."
-    zcat -f "$ANNOTATION" | grep '[[:blank:]]gene[[:blank:]]\|[[:blank:]]transcript[[:blank:]]\|[[:blank:]]exon[[:blank:]]' | grep -v '^GL000' | 
-    sed "s/$gtfChrRemove//" | awk -v var="$gtfChrAdd" '{print var$0}' | java -cp bin getSpliceSiteIntervalsFromGTF | grep -E "[[:space:]]\+[[:space:]]" > data/"$gtfBasename"_SpliceSiteIntervals_pos.txt
-    zcat -f "$ANNOTATION" | grep '[[:blank:]]gene[[:blank:]]\|[[:blank:]]transcript[[:blank:]]\|[[:blank:]]exon[[:blank:]]' | grep -v '^GL000' | 
-    sed "s/$gtfChrRemove//" | awk -v var="$gtfChrAdd" '{print var$0}' | java -cp bin getSpliceSiteIntervalsFromGTF | grep -E "[[:space:]]\-[[:space:]]" > data/"$gtfBasename"_SpliceSiteIntervals_neg.txt
+    zcat -f "$ANNOTATION" | grep -v '^GL000' | sed "s/$gtfChrRemove//" | awk -v var="$gtfChrAdd" '{print var$0}' | java -cp bin getSpliceSiteIntervalsFromGTF "$gtfBasename"
+    #zcat -f "$ANNOTATION" | grep -v '^GL000' | sed "s/$gtfChrRemove//" | awk -v var="$gtfChrAdd" '{print var$0}' | java -cp bin getSpliceSiteIntervalsFromGTF | grep -E "[[:space:]]\-[[:space:]]" > data/"$gtfBasename"_SpliceSiteIntervals_neg.txt
 fi
 
 #for each input VCF/TSV file
@@ -146,11 +149,9 @@ for FILE in $INPUTFILES; do
     #write headers
     echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tmesDonRef\tmesDonAlt\tmesAccRef\tmesAccAlt\tgsDonRef\tgsDonAlt\tgsAccRef\tgsAccAlt\tESEmaxRef\tESEmaxAlt\tESSminRef\tESSminAlt\tdonGainP\taccGainP\tdonLossP\taccLossP" > output/"$fileID"_out.txt
     echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tmesDonRef\tmesDonAlt\tmesAccRef\tmesAccAlt\tgsDonRef\tgsDonAlt\tgsAccRef\tgsAccAlt\tESEmaxRef\tESEmaxAlt\tESSminRef\tESSminAlt\tdonGainP\taccGainP\tdonLossP\taccLossP\tdistDon5\'\tdistDon3\'\tdistAcc5\'\tdistAcc3\'\tdon1PosRef\tdon1PosAlt\tdon2PosRef\tdon2PosAlt\tacc1PosRef\tacc1PosAlt\tacc2PosRef\tacc2PosAlt" > output/"$fileID"_out.txt
-    echo -e "#CHR\tSTART\tREF\tALT\tGENE\tdonGainP\taccGainP" > output/"$fileID"_ssGain.txt
-    echo -e "#CHR\tSTART\tREF\tALT\tGENE\twithinSS\tdonLossP\taccLossP" > output/"$fileID"_withinSS.txt
 
     #remove temp files from any previous run
-    rm temp/"$fileID"* 2> /dev/null
+    rm temp/"$fileID"* output/"$fileID"mesOmmitted.txt output/"$fileID"refMismatch.txt 2> /dev/null
 
     #determine input file type
     FILETYPE=""
@@ -181,7 +182,7 @@ for FILE in $INPUTFILES; do
     #sort body of input file
         zcat -f "$FILE" | grep "^#" > temp/"$fileID"_sorted
         if [ "$FILETYPE" == "TSV" ]; then
-            zcat -f "$FILE" | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$1, $2, $2, "x", "1", ".", $3, $4}' >> temp/"$fileID"_sorted
+            zcat -f "$FILE" | awk NF | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$1, $2, $2, "x", "1", ".", $3, $4}' >> temp/"$fileID"_sorted
         else 
             zcat -f "$FILE" | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$0}' >> temp/"$fileID"_sorted
         fi
@@ -201,9 +202,7 @@ for FILE in $INPUTFILES; do
         recentBedtools=true
     fi
 
-    strands="pos neg"
-    strands="neg"
-    for strand in $strands; do
+    for strand in $STRANDS; do
         strandSym="+"
         if [ "$strand" == "neg" ]; then
             strandSym="-"
@@ -213,10 +212,7 @@ for FILE in $INPUTFILES; do
         #bedtools intersect to exclude intergenic variants
         zcat -f "$ANNOTATION"| awk -v OFS="\\t" -v var="$strandSym" '$7 == var && $3 == "gene" {print}' | sort -k1,1 -k4,4n | grep -v '^GL000' | awk -v var="$gtfChrAdd" -v OFS="\\t" '{print var$0}' | sed "s/$gtfChrRemove//" | bedtools intersect -a temp/"$fileID"_sorted -b stdin -wa -wb -sorted  > temp/"$fileID"unstrandedInput.txt 
         if [ $? -ne 0 ]; then
-            echo "Warning. Bedtools intersect returned non-zero exit status. Intersection failed between provided variant VCF/BED file and provided GTF. See above error message for more details"
-        fi
-        if [ ! -s temp/"$fileID"unstrandedInput.txt ]; then
-            echo "Error: no variants were returned following bedtools intersect between input file \""$fileID"\" and gtf. \n Exiting..."
+            echo "Bedtools intersect returned non-zero exit status. Intersection failed between provided variant VCF/BED file and provided GTF. Exiting..."
             exit 1
         fi
 
@@ -234,41 +230,28 @@ for FILE in $INPUTFILES; do
             bedtools getfasta -fi $FASTAPATH -bed temp/"$fileID"fastaIntervals.bed -name -s > temp/"$fileID"seqToScan.FASTA
         fi
         if [ ! -s temp/"$fileID"seqToScan.FASTA ]; then
-            echo "Error: no variants were returned following bedtools getfasta command. \n Exiting..."
-            exit 1
+            echo "Warning: no variants were returned following bedtools getfasta command on $strand strand"
         fi
 
-        #seqScan: generates input strings for maxentscan and genesplicer as well as ESRseq scores
+        #seqScan: generates input strings for maxentscan and ESRseq scores
         echo "Scanning for motifs..."
-        rm output/"$fileID"mesOmmitted.txt 2> /dev/null
-        rm output/"$fileID"refMismatch.txt 2> /dev/null
         java -cp bin seqScan temp/"$fileID"seqToScan.FASTA -useESR $fileID 1>&2
-        if [ -s output/"$fileID"refMismatch.txt ]; then
-            refMismatchCount=$(wc -l output/"$fileID"refMismatch.txt | awk '{print $1}')
-            echo "Note: $refMismatchCount variants were excluded because the provided Reference allele does not match the nucleotide(s) in the provided FASTA. IDs of excluded variant(s) are outputted here: Spliceogen/output/""$fileID""refMismatch.txt"
-        fi
-        if [ -s output/"$fileID"mesOmmitted.txt ]; then
-            mesOmmittedCount=$(wc -l output/"$fileID"mesOmmitted.txt | awk '{print $1}')
-            echo "Note: $mesOmmittedCount variants were excluded from MaxEntScan because their flanking FASTA sequence contains invalid characters (most commonly \"n\"), which cannot be processed by MaxEntScan. IDs of ommitted variant(s) are listed in: Spliceogen/output/""$fileID""mesOmmitted.txt"
-        fi
 
         #run maxEntScan and confirm non-zero exit, since invalid inputs cause it to exit early
         if [ -s temp/"$fileID"mesDonorInput.txt ] || [ -s temp/"$fileID"mesAcceptorInput.txt ] ; then
             echo "Running MaxEntScan..."
-#            perl score5.pl temp/"$fileID"mesDonorInput.txt | sed 's/;-;(-)/;/' | sed 's/;+;/;/' | sort -t '>' -k2 | java -cp bin processScoresMES > temp/"$fileID"mesDonorScores.txt
+            perl score5.pl temp/"$fileID"mesDonorInput.txt | sed 's/;-;(-)/;/' | sed 's/;+;/;/' | sort -t '>' -k2 | java -cp bin processScoresMES > temp/"$fileID"mesDonorScores.txt
             retVal=( ${PIPESTATUS[0]} )
             if [ $retVal -ne 0 ]; then
                 echo "MaxEntScan returned non-zero exit status. It is likely not all variants were processed. Exiting..."
-#            exit $retVal
+            exit $retVal
             fi
-#            perl score3.pl temp/"$fileID"mesAcceptorInput.txt | sed 's/;-;(-)/;/' | sed 's/;+;/;/' | sort -t '>' -k2 | java -cp bin processScoresMES > temp/"$fileID"mesAcceptorScores.txt
-#            retVal=( ${PIPESTATUS[0]} )
+            perl score3.pl temp/"$fileID"mesAcceptorInput.txt | sed 's/;-;(-)/;/' | sed 's/;+;/;/' | sort -t '>' -k2 | java -cp bin processScoresMES > temp/"$fileID"mesAcceptorScores.txt
+            retVal=( ${PIPESTATUS[0]} )
             if [ $retVal -ne 0 ]; then
                 echo "MaxEntScan returned non-zero exit status. It is likely not all variants were processed. Exiting..."
-#            exit $retVal
+            exit $retVal
             fi
-        else
-            echo "No input for MaxEntScan"
         fi
 
         #determine files to merge
@@ -299,51 +282,64 @@ for FILE in $INPUTFILES; do
             echo "No MaxEntScan/GeneSplicer/ESRseq scores to process"
         else
             echo "Processing scores..."
-            cat $(echo "$scoresToMerge") data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt sources/terminatingMergeLine.txt | sort -k1,1 -V -k 2,2n -k 3 -k 4 -s | tee mergeInput_"$strand".txt | java -cp bin mergeOutput "$fileID" inputAdd="$inputChrRemove" inputRemove="$inputChrAdd" "$strand" >> mergeOut.txt
+            cat $(echo "$scoresToMerge") data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt sources/terminatingMergeLine.txt | sort -k1,1 -V -k 2,2n -k 3 -k 4 -s | java -cp bin mergeOutput "$fileID" inputAdd="$inputChrRemove" inputRemove="$inputChrAdd" "$strand"
 
         fi
-	    rm temp/"$fileID"mes* temp/"$fileID"ESRoutput.txt temp/"$fileID"gsInput.FASTA
+	    rm temp/"$fileID"mes* temp/"$fileID"ESRoutput.txt
     done
 
+    #report FASTA issues- ref allele mismatches and invalid characters
+    if [ -s output/"$fileID"refMismatch.txt ]; then
+        refMismatchCount=$(sort output/"$fileID"refMismatch.txt | sed 's/-;(-)/+;/g' | uniq | wc -l | awk '{print $1}')
+        echo "Note: $refMismatchCount variant(s) were excluded because the provided Reference allele does not match the nucleotides in the provided FASTA. IDs of excluded variants are listed here: Spliceogen/output/""$fileID""refMismatch.txt"
+    fi
+    if [ -s output/"$fileID"mesOmmitted.txt ]; then
+        mesOmmittedCount=$(sort output/"$fileID"mesOmmitted.txt | sed 's/-;(-)/+;/g' | uniq | wc -l | awk '{print $1}')
+        echo "Note: $mesOmmittedCount variant(s) were excluded because their flanking FASTA sequence contains invalid characters (most commonly \"n\"). IDs of ommitted variants are listed here: Spliceogen/output/""$fileID""mesOmmitted.txt"
+    fi
+
     #sort predictions
-    echo "sorting predictions..."
     if [ -s temp/"$fileID"_out_unsorted.txt ]; then
-        cat temp/"$fileID"_out_unsorted.txt >> output/"$fileID"_unsortedBothStrands.txt
-    fi 
-    if [ -s temp/"$fileID"_gain_unsorted.txt ]; then
-        sort -gr -k8,8 temp/"$fileID"_gain_unsorted.txt | cut -f1-7 >> output/"$fileID"_ssGain.txt
-    fi 
-    if [ -s temp/"$fileID"_loss_unsorted.txt ]; then
-        sort -gr -k9,9 temp/"$fileID"_loss_unsorted.txt | cut -f1-8 >> output/"$fileID"_withinSS.txt
-    fi 
+        echo "sorting predictions..."
+        #set if need ESR scores
+        if [ "useESR" == "true" ]; then
+            echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tmesDonRef\tmesDonAlt\tmesAccRef\tmesAccAlt\tdistDon5'\tdistDon3'\tdistAcc5'\tdistAcc3'\tESEmaxRef\tESEmaxAlt\tESSminRef\tESSminAlt\tdonGainP\taccGainP\tdonLossP\taccLossP\tdonPhaseScore\taccPhaseScore" > output/"$fileID"_out.txt
+            sort -k1,1 -V -k 2,2n -k 3 -k 4 -s output/"$fileID"_unsortedBothStrands.txt >> output/"$fileID"_out.txt
+        else
+            echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tmesDonRef\tmesDonAlt\tmesAccRef\tmesAccAlt\tdistDon5'\tdistDon3'\tdistAcc5'\tdistAcc3'\tdESE\tdESS\tdonGainP\taccGainP\tdonLossP\taccLossP\tdonPhaseScore\taccPhaseScore" > output/"$fileID"_out.txt
+            sort -k1,1 -V -k 2,2n -k 3 -k 4 -s temp/"$fileID"_out_unsorted.txt | cut --complement -f18-19 >> output/"$fileID"_out.txt
+        fi
+    fi
     #clean up temp files
-    #rm temp/"$fileID"* 2> /dev/null
-    #sort -k1,1 -V -k 2,2n -k 3 -k 4 -s > output/"$fileID"_out_sorted.txt
-    sort -k1,1 -V -k 2,2n -k 3 -k 4 -s output/"$fileID"_unsortedBothStrands.txt >> output/"$fileID"_out.txt
-    cat output/"$fileID"_out.txt | cut --complement -f11-19 > output/"$fileID"_out.txt_temp
-    rm output/"$fileID"_out.txt
+    rm temp/"$fileID"* 2> /dev/null
+    #cat output/"$fileID"_out.txt | cut --complement -f11-19 > output/"$fileID"_out.txt_temp
+    #rm output/"$fileID"_out.txt
 
     #echo -e "#CHR\tSTART\tEND\tREF\tALT\tGENE\twithinSite\tdonGainP\taccGainP\tdonLossP\taccLossP\tdistDon5\'\tdistDon3\'\tdistAcc5\'\tdistAcc3\'\tdon1PosRef\tdon1PosAlt\tdon2PosRef\tdon2PosAlt\tacc1PosRef\tacc1PosAlt\tacc2PosRef\tacc2PosAlt" > output/"$fileID"_out.txt
-    grep -v "^#" output/"$fileID"_out.txt_temp | awk -v OFS="\\t" '{print $1, $2, $3, $4, $5, $6, $7, $11, $12, $13, $14}' >> output/"$fileID"_out.txt
-    rm output/"$fileID"_unsortedBothStrands.txt output/*ssGain* output/*withinSS*
-    #merge predictions from both strands
-    while read -r chr start end ref alt gene within donGain accGain donLoss accLoss ; do
-	#if not first line
-        if [ "$prevLine" != "" ]; then
-            newDonGain=$(echo "$donGain")
-            newAccGain=$(echo "$accGain")
-            prevStart=$(echo "$prevLine" | awk '{print $2}')
-	    duplicate="false"
-	    #check for duplicate
-            if [ "$prevStart" == "$start" ]; then
-            	prevRef=$(echo "$prevLine" | awk '{print $4}')
-                if [ "$prevRef" == "$ref" ]; then
-            	    prevAlt=$(echo "$prevLine" | awk '{print $5}')
-                    if [ "$prevAlt" == "$alt" ]; then
-		        duplicate="true"
-		    fi
-		fi
-	    fi
+    #grep -v "^#" output/"$fileID"_out.txt_temp | awk -v OFS="\\t" '{print $1, $2, $3, $4, $5, $6, $7, $11, $12, $13, $14}' >> output/"$fileID"_out.txt
+    #rm output/"$fileID"_unsortedBothStrands.txt output/*ssGain* output/*withinSS*
+
+
+#start comment to skip duplicate operations
+#    #merge predictions from both strands
+#    while read -r chr start end ref alt gene within donGain accGain donLoss accLoss ; do
+#	#if not first line
+#        if [ "$prevLine" != "" ]; then
+#            newDonGain=$(echo "$donGain")
+#            newAccGain=$(echo "$accGain")
+#            prevStart=$(echo "$prevLine" | awk '{print $2}')
+#	    duplicate="false"
+#	    #check for duplicate
+#            if [ "$prevStart" == "$start" ]; then
+#            	prevRef=$(echo "$prevLine" | awk '{print $4}')
+#                if [ "$prevRef" == "$ref" ]; then
+#            	    prevAlt=$(echo "$prevLine" | awk '{print $5}')
+#                    if [ "$prevAlt" == "$alt" ]; then
+#		        duplicate="true"
+#		        fi
+#		    fi
+#	    fi
+#
 #	    #if duplicate line
 #	    if [ "$duplicate" == "true" ]; then
 #                #overlapping, so find highest scores
@@ -395,11 +391,13 @@ for FILE in $INPUTFILES; do
 #    		echo -e "$prevLine" >> output/"$fileID"_out.txt_merged
 #	    	prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$gene\t$within\t$donGain\t$accGain\t$donLoss\t$accLoss")
 #	    fi
-	#first line only
-	else
-	    rm "$file"_fixed
-	    prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$gene\t$within\t$donGain\t$accGain\t$donLoss\t$accLoss")
-        fi
-    done < output/"$fileID"_out.txt
-    echo -e "$prevLine" >> output/"$fileID"_out.txt_merged
+#
+#	#first line only
+#	else
+#	    rm "$file"_fixed
+#	    prevLine=$(echo -e "$chr\t$start\t$end\t$ref\t$alt\t$gene\t$within\t$donGain\t$accGain\t$donLoss\t$accLoss")
+#        fi
+#    done < output/"$fileID"_out.txt
+#    echo -e "$prevLine" >> output/"$fileID"_out.txt_merged
+#end comment to slip duplicate operations
 done

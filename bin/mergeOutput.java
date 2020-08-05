@@ -13,9 +13,9 @@ import java.util.Arrays;
 import java.util.jar.Attributes.Name;
 import java.lang.*;
 import java.text.DecimalFormat;
+
 public class mergeOutput
 {
-
     //store output lines in buffers to minimise I/O
     public static String[] avBuffer = new String[30000];
     public static String[] gainBuffer = new String[30000];
@@ -165,6 +165,16 @@ public class mergeOutput
                     //update withinSS motif positions
                     scores = updateWithinSSmotifPostions(withinSS, scores);
                     //System.out.println(out[0]+"\t"+out[1]+"\t"+out[3]+"\t"+out[4]+"\t"+strand+"\t"+withinSS+"\t"+Double.toString(scores[20])+"\t"+Double.toString(scores[21])+"\t"+Double.toString(scores[22])+"\t"+Double.toString(scores[23]));
+
+                    //include phase info
+                    out[11]= Integer.toString(phase[0]);
+                    out[12]= Integer.toString(phase[1]);
+                    out[13]= Integer.toString(phase[2]);
+                    out[14]= Integer.toString(phase[3]);
+
+                    out[23] = Double.toString(donPhaseScore(phase));
+                    out[24] = Double.toString(accPhaseScore(phase));
+
                     //calculate donor/acceptor creating logistic regression scores
                     String[] lrScores = calculateLogRegScores(scores, out).split("\\s+");
                     out[19]= lrScores[0];
@@ -172,14 +182,6 @@ public class mergeOutput
                     out[21]= lrScores[2];
                     out[22]= lrScores[3];
 
-                    //include phase info
-                    out[23]= Integer.toString(phase[0]);
-                    out[24]= Integer.toString(phase[1]);
-                    out[25]= Integer.toString(phase[2]);
-                    out[26]= Integer.toString(phase[3]);
-
-                    out[7] = Double.toString(donPhaseScore(phase));
-                    out[8] = Double.toString(accPhaseScore(phase));
                     /*
                     //temporarily include don/acc score position in output
                     //don
@@ -208,6 +210,17 @@ public class mergeOutput
                     {
                         out[0]=out[0].substring(3);
                     }
+
+                    //include delta ESRseq instead of alt scores
+                    for (int j=15; j<19; j++)
+                    {
+                        if(out[j].equals("."))
+                        {
+                            out[j]="0.00";
+                        }
+                    }
+                    out[15] = String.format("%.02f",Double.parseDouble(out[15])-Double.parseDouble(out[16]));
+                    out[16] = String.format("%.02f",Double.parseDouble(out[17])-Double.parseDouble(out[18]));
 
                     //add line to output buffers and reset scores
                     outputVariantToBuffers(out);
@@ -371,9 +384,11 @@ public class mergeOutput
             updatedGeneID[3] = updatedGeneID[3].concat(currentGeneEnd);
 
             return updatedGeneID;
-}
+        }
 
-public static String calculateLogRegScores (double[] s, String[] out) {
+public static String calculateLogRegScores (double[] s, String[] out)
+{
+    //maxentscan variables
     double imputeVal = -15.0;
     double donGainIntercept = 0.09186; double donGainCoef_c = 0.1266; double donGainCoef_alt = 0.2655;
     double accGainIntercept = -1.0362; double accGainCoef_c = 0.1096; double accGainCoef_alt = 0.2869;
@@ -381,10 +396,12 @@ public static String calculateLogRegScores (double[] s, String[] out) {
     double accLossIntercept = -0.93825; double accLossCoef_c = -0.8017;
     double donGainWithinIntercept = -0.07592; double donGainWithinCoef_d = 1.3941;
     double accGainWithinIntercept = 0.5292; double accGainWithinCoef_r2 = -0.3682; double accGainWithinCoef_d = 0.5236; double accGainWithinCoef_og = -0.1877;
+
     //impute missing values
-    //maxEntScan
-    for (int i=0; i<4; i++) {
-        if (s[i]==-99.0 | s[i]==0.0) {
+    for (int i=0; i<4; i++)
+    {
+        if (s[i]==-99.0 | s[i]==0.0)
+        {
             s[i] = imputeVal;
         }
     }
@@ -394,60 +411,81 @@ public static String calculateLogRegScores (double[] s, String[] out) {
     double gsDonChange = s[5] - s[4];
     double gsAccChange = s[7] - s[6];
     double pDonGain = -1; double pAccGain = -1; double pDonLoss = -1; double pAccLoss = -1;
-    // using within/outside splice site logistic regression models, calculate p = 1/(1+e^-(a + b1X1 + b2X2 + ... + bnXn))
-    if (!out[6].contains("ENSE")) {
+
+    /* Using within/outside splice site logistic regression models, calculate p = 1/(1+e^-(a + b1X1 + b2X2 + ... + bnXn)) */
+
+    // outside splice site
+    if (!out[6].contains("ENSE"))
+    {
         pDonGain = 1/(1 + Math.exp(-(donGainIntercept + (mesDonChange * donGainCoef_c) + (s[1] * donGainCoef_alt))));
         pAccGain = 1/(1 + Math.exp(-(accGainIntercept + (mesAccChange * accGainCoef_c) + (s[3] * accGainCoef_alt))));
+
+        //phase variable
+        double donPhaseIntercept = -8.203503; double donMesLogReg1_coef = 9.941136; double donPhase_coef = 4.040833;
+        double accPhaseIntercept = -5.105919; double accMesLogReg1_coef = 6.198231; double accPhase_coef = 7.008072;
+        pDonGain = 1/(1 + Math.exp(-(donPhaseIntercept + (pDonGain * donMesLogReg1_coef) + (Double.parseDouble(out[23]) * donGainCoef_alt))));
+        pAccGain = 1/(1 + Math.exp(-(accPhaseIntercept + (pAccGain * accMesLogReg1_coef) + (Double.parseDouble(out[24]) * accGainCoef_alt))));
     }
-    if (out[6].contains("donor")){
+
+    //within donor site
+    if (out[6].contains("donor"))
+    {
         pDonLoss = 1/(1 + Math.exp(-(donLossIntercept + (mesDonChange * donLossCoef_c) )));
         double denovoScore = s[13];
         double ogScore = s[3];
+
         //if highest alt score is at a different site (accounting for indels)
-        if (Math.abs(out[3].length() - out[4].length()) < Math.abs(s[14] - s[15]) ) {
+        if ( Math.abs(out[3].length() - out[4].length()) < Math.abs(s[14] - s[15]) )
+        {
             denovoScore = s[3];
             ogScore = s[13];
         }
         double denovoChange = denovoScore - s[12];
         pDonGain = 1/(1 + Math.exp(-(donGainWithinIntercept + (denovoScore * donGainWithinCoef_d))));
     }
-    if (out[6].contains("acceptor")){
+
+    //within acceptor site
+    if (out[6].contains("acceptor"))
+    {
         pAccLoss = 1/(1 + Math.exp(-(accLossIntercept + (mesAccChange * accLossCoef_c) )));
         double denovoScore = s[13];
         double ogScore = s[3];
+
         //if highest alt score is at a different site (accounting for indels)
-        if (Math.abs(out[3].length() - out[4].length()) < Math.abs(s[14] - s[15]) ) {
+        if (Math.abs(out[3].length() - out[4].length()) < Math.abs(s[14] - s[15]) )
+        {
             denovoScore = s[3];
             ogScore = s[13];
         }
         double denovoChange = denovoScore - s[12];
         pAccGain = 1/(1 + Math.exp(-(accGainWithinIntercept + ( (s[12] * accGainWithinCoef_r2) + (denovoScore * accGainWithinCoef_d) + (ogScore * accGainWithinCoef_og) ))));
     }
+
+    //format scores
     String pDonGainStr = Double.toString(pDonGain);
     String pAccGainStr = Double.toString(pAccGain);
     String pDonLossStr = Double.toString(pDonLoss);
     String pAccLossStr = Double.toString(pAccLoss);
-    //round scores to 2 decimal places
-    try {
+    try
+    {
         pDonGainStr = String.format("%.02f",pDonGain);
         pAccGainStr = String.format("%.02f",pAccGain);
         pDonLossStr = String.format("%.02f",pDonLoss);
         pAccLossStr = String.format("%.02f",pAccLoss);
-    } catch (Exception e) {
-        //use unrounded score
     }
-    if (pDonGainStr.equals("-1.00")) {
-        pDonGainStr = ".";
+    catch (Exception e)
+    {
+        //just use unrounded score
     }
-    if (pAccGainStr.equals("-1.00")) {
-        pAccGainStr = ".";
-    }
-    if (pDonLossStr.equals("-1.00")) {
+    if (pDonLossStr.equals("-1.00"))
+    {
         pDonLossStr = ".";
     }
-    if (pAccLossStr.equals("-1.00")) {
+    if (pAccLossStr.equals("-1.00"))
+    {
         pAccLossStr = ".";
     }
+
     String ret = pDonGainStr + "\t" + pAccGainStr + "\t" + pDonLossStr + "\t" + pAccLossStr;
     return ret;
 }
@@ -666,7 +704,6 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
         phase[0] = -9999999; phase[2] = -9999999;
         phase[1] = Integer.MAX_VALUE; phase[3] = Integer.MAX_VALUE;
 
-        //loop over donor sites
         while (donStart[i] > 0)
         {
             //closest upstream donor
@@ -741,7 +778,7 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
 		else
 		{
 			phase[1] = phase[1] - startPos;
-            phase[3] = startPos - geneEnd;
+            phase[3] = phase[3] - startPos;
 		}
     }
 
@@ -751,7 +788,6 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
         phase[0] = Integer.MAX_VALUE; phase[2] = Integer.MAX_VALUE;
         phase[1] = -9999999; phase[3] = -9999999;
 
-        //loop over donor sites
         while (donStart[i] > 0)
         {
             //closest upstream donor
@@ -767,7 +803,6 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
             i++;
         }
 
-        //loop over acceptor sites
         i = 0;
         while (accStart[i] > 0)
         {
@@ -833,11 +868,11 @@ public static int[] findNearestSpliceSites( String[] prevID, int[] donStart, int
 public static void outputVariantToBuffers(String[] out) {	
     //write full line for annovar
     String avLine = "";
-    for (int i=0; i<26; i++)
+    for (int i=0; i<24; i++)
     {
         avLine = avLine+out[i]+"\t";
     }
-    avLine = avLine+out[26];
+    avLine = avLine+out[24];
     avBuffer[avBufferIndex] = avLine;
     avBufferIndex++;
     /*	        //write withinSS
@@ -1001,6 +1036,9 @@ public static double[] updateWithinSSmotifPostions( String withinSS, double[] sc
     return scores;
 }
 
+// input: distances to 4 neighbouring splice sites
+// returns a score representing likelihood of donor gain based on phase
+//
 public static double donPhaseScore(int[] phase)
 {
     double val = 0;
@@ -1044,6 +1082,9 @@ public static double donPhaseScore(int[] phase)
     return val;
 }
 
+// input: distances to 4 neighbouring splice sites
+// returns a score representing likelihood of acceptor gain based on phase
+//
 public static double accPhaseScore(int[] phase)
 {
     double val = 0;

@@ -215,37 +215,40 @@ class seqScan {
                 }	
 
                 //if donor
-                if (s.substring(i, i+2).equals("gt") && i<26+correct1+flank+ref.length()-1)
+                if (i<26+correct1+flank+ref.length()-1)
                 {
-                    //output ref and alt donor strings
-                    int pos = flank-i-correct1+32; 
-                    mesOutputDon[mesIndexDon]=s.substring(i-3, i+6).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos));
-                    mesIndexDon++;
-                    mesOutputDon[mesIndexDon]=altSeq.substring(i-3, i+6).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos));
-                    mesIndexDon++;
+                    if (s.substring(i, i+2).equals("gt") || s.substring(i, i+2).equals("gc"))
+                    {
+                        //output ref and alt donor strings
+                        int pos = flank-i-correct1+32; 
+                        mesOutputDon[mesIndexDon]=s.substring(i-3, i+6).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos));
+                        mesIndexDon++;
+                        mesOutputDon[mesIndexDon]=altSeq.substring(i-3, i+6).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos));
+                        mesIndexDon++;
 
-                    //for indels, output offset alt donor string
-                    if (ref.length()>1 || correct2==1)
-                    {
-                        int j=1;
-                        do
-                        {                
-                            mesOutputDon[mesIndexDon]=altSeq.substring(i-3-j, i+6-j).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos+j));
-                            mesIndexDon++;
-                            j++;
-                        }
-                        while (j<ref.length()+correct2 && i >= j+3);
-                    }
-                    else if (alt.length()>1)
-                    {
-                        int j=1;
-                        do
+                        //for indels, output offset alt donor string
+                        if (ref.length()>1 || correct2==1)
                         {
-                            mesOutputDon[mesIndexDon]=altSeq.substring(i-3+j, i+6+j).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos+j));
-                            mesIndexDon++;
-                            j++;
+                            int j=1;
+                            do
+                            {                
+                                mesOutputDon[mesIndexDon]=altSeq.substring(i-3-j, i+6-j).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos+j));
+                                mesIndexDon++;
+                                j++;
+                            }
+                            while (j<ref.length()+correct2 && i >= j+3);
                         }
-                        while (j<alt.length());
+                        else if (alt.length()>1)
+                        {
+                            int j=1;
+                            do
+                            {
+                                mesOutputDon[mesIndexDon]=altSeq.substring(i-3+j, i+6+j).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos+j));
+                                mesIndexDon++;
+                                j++;
+                            }
+                            while (j<alt.length());
+                        }
                     }
                 }	
             }
@@ -289,38 +292,41 @@ class seqScan {
                 }
 
                 //if donor
-                if (altSeq.substring(i, i+2).equals("gt") && i<26+correct1+flank+alt.length()-1)
+                if (i<26+correct1+flank+alt.length()-1)
                 {
-                    int pos = flank-i-correct1+32; 
-
-                    //output ref and alt donor strings
-                    mesOutputDon[mesIndexDon]=altSeq.substring(i-3, i+6).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos));
-                    mesIndexDon++;
-                    mesOutputDon[mesIndexDon]=s.substring(i-3, i+6).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos));
-                    mesIndexDon++;
-
-                    //for indels, output offset ref donor string
-                    if (alt.length()>1)
+                    if (altSeq.substring(i, i+2).equals("gt") || altSeq.substring(i, i+2).equals("gc"))
                     {
-                        int j=1;
-                        do
+                        int pos = flank-i-correct1+32; 
+
+                        //output ref and alt donor strings
+                        mesOutputDon[mesIndexDon]=altSeq.substring(i-3, i+6).concat(id).concat("DON").concat("ALT;").concat(Integer.toString(pos));
+                        mesIndexDon++;
+                        mesOutputDon[mesIndexDon]=s.substring(i-3, i+6).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos));
+                        mesIndexDon++;
+
+                        //for indels, output offset ref donor string
+                        if (alt.length()>1)
                         {
-                            mesOutputDon[mesIndexDon]=s.substring(i-3-j, i+6-j).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos+j));
-                            mesIndexDon++;
-                            j++;
+                            int j=1;
+                            do
+                            {
+                                mesOutputDon[mesIndexDon]=s.substring(i-3-j, i+6-j).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos+j));
+                                mesIndexDon++;
+                                j++;
+                            }
+                            while (j<alt.length() && i >= j+3);
                         }
-                        while (j<alt.length() && i >= j+3);
-                    }
-                    if (ref.length()>1 || correct2==1)
-                    {
-                        int j=1;
-                        do
+                        if (ref.length()>1 || correct2==1)
                         {
-                            mesOutputDon[mesIndexDon]=s.substring(i-3+j, i+6+j).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos+j));
-                            mesIndexDon++;
-                            j++;                    
+                            int j=1;
+                            do
+                            {
+                                mesOutputDon[mesIndexDon]=s.substring(i-3+j, i+6+j).concat(id).concat("DON").concat("REF;").concat(Integer.toString(pos+j));
+                                mesIndexDon++;
+                                j++;                    
+                            }
+                            while (j<ref.length()+correct2);
                         }
-                        while (j<ref.length()+correct2);
                     }
                 }
             }
