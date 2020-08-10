@@ -103,7 +103,7 @@ esac
 done
 set - "${POSITIONAL[@]}"
 
-#check input files exist and are not gzipped
+#check input files exist
 if [ ! -f $FASTAPATH ]; then
     echo -e "Fasta file not found: use -fasta ./path/to/hgXX.fa\nExiting..."
     exit 1
@@ -114,7 +114,7 @@ fi
 
 #correct mismatches in "chr" nomenclature between gtf and fasta
 gtfChr=$(zcat -f "$ANNOTATION" | grep -v '^GL000' | tail -1 | awk '{print $1}' | grep chr)
-fastaChr=$(cat "$FASTAPATH" | head -1 | awk '{print $1}' | grep chr)
+fastaChr=$(head -1 "$FASTAPATH" | awk '{print $1}' | grep chr)
     gtfChrAdd=""
     gtfChrRemove="UnmatchedString"
     if [ "$fastaChr" != "" ]; then
@@ -155,18 +155,20 @@ for FILE in $INPUTFILES; do
 
     #determine input file type
     FILETYPE=""
-    nFields=$(zcat -f $FILE | tail -1 | wc -w)
-    vcfHeader=$(zcat -f $FILE | head -1 | grep VCF)
+    nFields=$(tail -1 < <(zcat -f "$FILE"))
+    nFields=$(echo "$nFields" | wc -w)
+    #vcfHeader=$(zcat -f $FILE | head -1 | grep VCF)
     if [ "$nFields" -eq 4 ]; then
         FILETYPE="TSV"
-    elif [ ! -z "$vcfHeader" ]; then
-        FILETYPE="VCF"
     else
-        FILETYPE="BED"
+    #elif [ ! -z "$vcfHeader" ]; then
+        FILETYPE="VCF"
     fi
 
     #correct mismatches in "chr" nomenclature between variant input and provided gtf/fasta
-    inputChr=$(zcat -f "$FILE" | tail -1 | awk '{print $1}' | grep chr)
+    #inputChr=$(zcat -f "$FILE" | tail -1 | awk '{print $1}' | grep chr)
+    inputChr=$(tail -1 < <(zcat -f "$FILE"))
+    inputChr=$(echo "$inputChr" | awk '{print $1}' | grep chr)
     inputChrAdd=""
     inputChrRemove="UnmatchedString"
     if [ "$fastaChr" != "" ]; then
@@ -180,12 +182,12 @@ for FILE in $INPUTFILES; do
     fi
 
     #sort body of input file
-        zcat -f "$FILE" | grep "^#" > temp/"$fileID"_sorted
-        if [ "$FILETYPE" == "TSV" ]; then
-            zcat -f "$FILE" | awk NF | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$1, $2, $2, "x", "1", ".", $3, $4}' >> temp/"$fileID"_sorted
-        else 
-            zcat -f "$FILE" | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$0}' >> temp/"$fileID"_sorted
-        fi
+    zcat -f "$FILE" | grep "^#" > temp/"$fileID"_sorted
+    if [ "$FILETYPE" == "TSV" ]; then
+        zcat -f "$FILE" | awk NF | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$1, $2, $2, "x", "1", ".", $3, $4}' >> temp/"$fileID"_sorted
+    else 
+        zcat -f "$FILE" | grep -v "^#" | sort -k1,1 -k2,2n | sed "s/$inputChrRemove//" | awk -v OFS="\\t" -v var=$inputChrAdd '{print var$0}' >> temp/"$fileID"_sorted
+    fi
 
     #check bedtools is installed
     bedtoolsLocation=$(which bedtools);
@@ -235,7 +237,7 @@ for FILE in $INPUTFILES; do
 
         #seqScan: generates input strings for maxentscan and ESRseq scores
         echo "Scanning for motifs..."
-        java -cp bin seqScan temp/"$fileID"seqToScan.FASTA -useESR $fileID 1>&2
+        java -cp bin seqScan temp/"$fileID"seqToScan.FASTA -useESR $fileID >&2
 
         #run maxEntScan and confirm non-zero exit, since invalid inputs cause it to exit early
         if [ -s temp/"$fileID"mesDonorInput.txt ] || [ -s temp/"$fileID"mesAcceptorInput.txt ] ; then
@@ -267,7 +269,7 @@ for FILE in $INPUTFILES; do
         fi
 
         #edit splice site intervals file in event of changed input/fasta "chr" nomenclature
-        intervalsFileChr=$(cat data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt | head -1 | awk '{print $1}' | grep chr)
+        intervalsFileChr=$(head -1 data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt | awk '{print $1}' | grep chr)
         if [ "$fastaChr" != "" ]; then
             if [ "$intervalsFileChr" == "" ]; then
                 sed -i 's/^/chr/' data/"$gtfBasename"_SpliceSiteIntervals_"$strand".txt
@@ -291,7 +293,7 @@ for FILE in $INPUTFILES; do
     #report FASTA issues- ref allele mismatches and invalid characters
     if [ -s output/"$fileID"refMismatch.txt ]; then
         refMismatchCount=$(sort output/"$fileID"refMismatch.txt | sed 's/-;(-)/+;/g' | uniq | wc -l | awk '{print $1}')
-        echo "Note: $refMismatchCount variant(s) were excluded because the provided Reference allele does not match the nucleotides in the provided FASTA. IDs of excluded variants are listed here: Spliceogen/output/""$fileID""refMismatch.txt"
+        echo "Note: $refMismatchCount variant(s) were excluded because the provided Reference allele does not match the nucleotides in the provided FASTA. IDs of excluded variants are listed here: Spliceogen/output/""$fileID""refMismatch.txt"  >&2
     fi
     if [ -s output/"$fileID"mesOmmitted.txt ]; then
         mesOmmittedCount=$(sort output/"$fileID"mesOmmitted.txt | sed 's/-;(-)/+;/g' | uniq | wc -l | awk '{print $1}')
